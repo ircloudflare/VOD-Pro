@@ -1,0 +1,1263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Liquid Glass HLS Player</title>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
+<style>
+  :root {
+    --glass-bg: rgba(255, 255, 255, 0.08);
+    --glass-border: rgba(255, 255, 255, 0.18);
+    --glass-shine: rgba(255, 255, 255, 0.35);
+    --text: rgba(255, 255, 255, 0.9);
+    --muted: rgba(255, 255, 255, 0.55);
+    --accent: #8ec5ff;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--text);
+    background: #0b0d14;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 16px;
+    overflow-x: hidden;
+  }
+
+  /* Soft colored light behind the glass */
+  body::before, body::after {
+    content: "";
+    position: fixed;
+    width: 55vmax;
+    height: 55vmax;
+    border-radius: 50%;
+    filter: blur(90px);
+    opacity: 0.55;
+    z-index: -1;
+    pointer-events: none;
+  }
+  body::before { background: #3b6cff; top: -20vmax; left: -15vmax; }
+  body::after  { background: #c255ff; bottom: -20vmax; right: -15vmax; }
+
+  #wrap {
+    width: 100%;
+    max-width: 1100px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  /* Glass panel holding the video */
+  .glass {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 24px;
+    backdrop-filter: blur(24px) saturate(160%);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    box-shadow:
+      inset 0 1px 0 var(--glass-shine),
+      0 20px 60px rgba(0, 0, 0, 0.35);
+  }
+
+  .player {
+    padding: 10px;
+    overflow: hidden;
+  }
+
+  video {
+    width: 100%;
+    display: block;
+    background: #000;
+    border-radius: 16px;
+    -webkit-user-select: none;
+    user-select: none;
+    max-height: 80vh;
+    object-fit: contain;
+  }
+  video:focus, video:focus-visible { outline: none; }
+
+  /* Control bar as a floating glass pill */
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: 999px;
+    flex-wrap: wrap;
+  }
+
+  .bar input[type="text"] {
+    flex: 1;
+    min-width: 220px;
+    padding: 9px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--glass-border);
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text);
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .bar input[type="text"]:focus {
+    border-color: var(--accent);
+    background: rgba(255, 255, 255, 0.1);
+  }
+  .bar input[type="text"]::placeholder { color: var(--muted); }
+
+  .bar input[type="number"] {
+    width: 64px;
+    padding: 8px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--glass-border);
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text);
+    font-size: 14px;
+    text-align: center;
+    outline: none;
+  }
+  .bar input[type="number"]:focus { border-color: var(--accent); }
+
+  .bar label {
+    font-size: 13px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .proxy-toggle input {
+    accent-color: var(--accent);
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+  }
+
+  .bar select {
+    padding: 8px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--glass-border);
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text);
+    font-size: 14px;
+    outline: none;
+    cursor: pointer;
+  }
+  .bar select option { background: #151822; color: var(--text); }
+
+  .bar button {
+    padding: 8px 18px;
+    border-radius: 999px;
+    border: 1px solid rgba(142, 197, 255, 0.5);
+    background: linear-gradient(180deg, rgba(142, 197, 255, 0.35), rgba(142, 197, 255, 0.12));
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
+    transition: transform 0.15s, filter 0.2s;
+  }
+  .bar button:hover { filter: brightness(1.15); }
+  .bar button:active { transform: scale(0.97); }
+
+  #stats {
+    align-self: center;
+    font-size: 12px;
+    color: var(--muted);
+    padding: 6px 14px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--glass-border);
+    min-height: 1.6em;
+  }
+
+  button, select, input { -webkit-tap-highlight-color: transparent; }
+
+  /* Tablets and phones */
+  @media (max-width: 900px) {
+    body { padding: 16px 12px; align-items: flex-start; }
+    #wrap { gap: 12px; }
+  }
+
+  /* Phones: stacked controls, large touch targets */
+  @media (max-width: 720px) {
+    body { padding: 10px 8px; }
+    #wrap { gap: 10px; }
+    .player { padding: 6px; border-radius: 18px; }
+    video { border-radius: 12px; max-height: 60vh; }
+    .bar { border-radius: 22px; padding: 10px; gap: 8px; }
+    .bar input[type="text"] {
+      flex: 1 1 100%;
+      min-width: 0;
+      font-size: 16px; /* prevents iOS from zooming on focus */
+      padding: 12px 14px;
+    }
+    .bar button, .bar select, .bar input[type="number"] {
+      min-height: 44px;
+      font-size: 16px;
+    }
+    .bar button, .bar select { flex: 1 1 auto; }
+    .bar label { flex: 1 1 auto; justify-content: space-between; }
+    .bar label input[type="number"] { width: 90px; }
+  }
+
+  /* Phones in landscape: give the video as much height as possible */
+  @media (max-height: 500px) and (orientation: landscape) {
+    body { padding: 0; }
+    #wrap { max-width: none; gap: 6px; }
+    .player { padding: 0; border-radius: 0; }
+    video { border-radius: 0; max-height: 100vh; }
+  }
+
+  /* ---------- Saved links drawer ---------- */
+  .bar button.ghost {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: var(--glass-border);
+  }
+
+  .drawer {
+    position: fixed;
+    top: 16px; bottom: 16px; right: 16px;
+    width: min(340px, calc(100vw - 76px));
+    z-index: 10;
+    border-radius: 20px;
+    background: rgba(20, 24, 36, 0.72);
+    transform: translateX(calc(100% + 16px));
+    transition: transform 0.3s ease;
+  }
+  .drawer.open { transform: translateX(0); }
+
+  .tab {
+    position: absolute;
+    left: -44px; top: 50%;
+    transform: translateY(-50%);
+    width: 44px; height: 96px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+    border: 1px solid var(--glass-border); border-right: 0;
+    border-radius: 16px 0 0 16px;
+    background: rgba(20, 24, 36, 0.75);
+    backdrop-filter: blur(24px) saturate(160%);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    color: #fff; font: 700 12px system-ui; cursor: pointer; padding: 0;
+  }
+  .tab svg, .drawer-head svg { display: block; }
+
+  .drawer-body {
+    height: 100%;
+    display: flex; flex-direction: column; gap: 12px;
+    padding: 16px;
+    visibility: hidden;
+    transition: visibility 0s 0.3s;
+  }
+  .drawer.open .drawer-body { visibility: visible; transition: visibility 0s; }
+
+  .drawer-head { display: flex; align-items: center; gap: 8px; color: var(--accent); }
+  .drawer-head input {
+    flex: 1; min-width: 0;
+    background: transparent; border: 1px solid transparent; border-radius: 10px;
+    color: #fff; font: 600 15px system-ui; padding: 6px 8px; outline: none;
+  }
+  .drawer-head input:hover { border-color: var(--glass-border); }
+  .drawer-head input:focus { border-color: var(--accent); background: rgba(255, 255, 255, 0.08); }
+
+  .icon-btn {
+    width: 44px; height: 44px; flex: none;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 999px; border: 1px solid var(--glass-border);
+    background: rgba(255, 255, 255, 0.06); color: var(--text); cursor: pointer; padding: 0;
+  }
+
+  .cards {
+    flex: 1; overflow-y: auto;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-content: start;
+  }
+  .card {
+    position: relative; overflow: hidden; cursor: pointer;
+    border-radius: 16px; border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.06);
+  }
+  .card:hover { border-color: rgba(142, 197, 255, 0.5); }
+  .card .thumb {
+    display: flex; align-items: center; justify-content: center;
+    width: 100%; height: 72px; border: 0; color: #fff; cursor: pointer; padding: 0;
+  }
+  .card .del {
+    position: absolute; top: 6px; right: 6px;
+    width: 30px; height: 30px; border-radius: 999px; border: 0; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0, 0, 0, 0.55); color: #fff; cursor: pointer;
+  }
+  .card .del:hover { background: rgba(220, 60, 60, 0.85); }
+  .card .meta { padding: 8px 10px; }
+  .card .name { font: 600 13px system-ui; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card .link { font: 11px system-ui; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card input.rename {
+    width: 100%; font: 600 13px system-ui; color: #fff; padding: 2px 6px;
+    border-radius: 8px; border: 1px solid var(--accent); background: rgba(255, 255, 255, 0.1); outline: none;
+  }
+
+  .add-card {
+    min-height: 108px; border-radius: 16px;
+    border: 1px dashed rgba(142, 197, 255, 0.6); background: rgba(142, 197, 255, 0.08);
+    color: var(--accent); font: 600 13px system-ui; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  }
+  .save-form {
+    grid-column: 1 / -1;
+    display: flex; flex-direction: column; gap: 8px; padding: 12px;
+    border-radius: 16px; border: 1px solid rgba(142, 197, 255, 0.5); background: rgba(142, 197, 255, 0.08);
+  }
+  .save-form input {
+    min-height: 44px; padding: 0 14px; border-radius: 999px; font-size: 16px;
+    border: 1px solid var(--glass-border); background: rgba(255, 255, 255, 0.08); color: var(--text); outline: none;
+  }
+  .save-form input:focus { border-color: var(--accent); }
+  .save-form .row { display: flex; gap: 8px; }
+  .save-form .row button {
+    flex: 1; min-height: 44px; border-radius: 999px; font: 600 14px system-ui; color: #fff; cursor: pointer;
+    border: 1px solid rgba(142, 197, 255, 0.5); background: rgba(142, 197, 255, 0.25);
+  }
+  .save-form .row button.cancel { background: rgba(255, 255, 255, 0.06); border-color: var(--glass-border); }
+  .save-form .hint { font-size: 12px; color: #ffb3b3; min-height: 1em; }
+
+  /* ---------- VOD import: buttons, now-playing, modal, toast ---------- */
+  .bar button.icon {
+    padding: 0; width: 38px; height: 36px;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+
+  .btn {
+    padding: 8px 18px; border-radius: 999px; cursor: pointer;
+    border: 1px solid rgba(142, 197, 255, 0.5);
+    background: linear-gradient(180deg, rgba(142, 197, 255, 0.35), rgba(142, 197, 255, 0.12));
+    color: #fff; font: 600 14px system-ui;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
+    transition: transform 0.15s, filter 0.2s;
+  }
+  .btn:hover { filter: brightness(1.15); }
+  .btn:active { transform: scale(0.97); }
+  .btn.ghost { background: rgba(255, 255, 255, 0.08); border-color: var(--glass-border); }
+
+  .now { display: flex; align-items: center; gap: 12px; padding: 10px 14px 10px 18px; border-radius: 20px; }
+  .now[hidden] { display: none; }
+  .np-text { flex: 1; min-width: 0; }
+  .np-title { font: 600 15px system-ui; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .np-meta { font: 12px system-ui; color: var(--muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .modal {
+    position: fixed; inset: 0; z-index: 20; display: none;
+    align-items: center; justify-content: center; padding: 16px;
+    background: rgba(5, 7, 12, 0.55);
+    backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  }
+  .modal.open { display: flex; }
+  .modal-card {
+    width: 100%; max-width: 580px; max-height: min(85vh, 760px);
+    display: flex; flex-direction: column;
+    background: rgba(20, 24, 36, 0.9);
+  }
+  .modal-head { display: flex; align-items: center; gap: 8px; padding: 14px 14px 6px 20px; }
+  .modal-head h2 { flex: 1; margin: 0; font: 700 16px system-ui; color: #fff; }
+  .modal-body { padding: 8px 20px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+  .modal-note { font-size: 12.5px; line-height: 1.55; color: var(--muted); margin: 0; }
+  .modal-note code, .url-preview {
+    font: 12px ui-monospace, Menlo, Consolas, monospace; color: var(--accent); word-break: break-all;
+  }
+  .modal textarea, .modal .field input {
+    width: 100%; padding: 10px 14px; border-radius: 14px; outline: none; color: var(--text);
+    border: 1px solid var(--glass-border); background: rgba(255, 255, 255, 0.06);
+  }
+  .modal textarea { min-height: 220px; resize: vertical; font: 12px ui-monospace, Menlo, Consolas, monospace; }
+  .modal .field input { border-radius: 999px; font: 14px ui-monospace, Menlo, Consolas, monospace; }
+  .modal textarea:focus, .modal .field input:focus { border-color: var(--accent); }
+  .modal .field label { display: block; font-size: 12.5px; color: var(--muted); margin: 0 0 6px 6px; }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+
+  .vod-row {
+    display: flex; gap: 12px; align-items: center; width: 100%; padding: 8px; text-align: left;
+    border-radius: 16px; border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.06); color: inherit; cursor: pointer;
+  }
+  .vod-row:hover { border-color: rgba(142, 197, 255, 0.55); }
+  .vod-row .vt {
+    width: 128px; aspect-ratio: 16 / 9; flex: none; border-radius: 10px; overflow: hidden;
+    display: flex; align-items: center; justify-content: center; color: #fff;
+  }
+  .vod-row .vt img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .vod-row .vi { min-width: 0; }
+  .vod-row .vn { font: 600 14px system-ui; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .vod-row .vm { font: 12px system-ui; color: var(--muted); margin-top: 3px; line-height: 1.5; }
+
+  .link-row { display: flex; align-items: center; gap: 10px; }
+  .link-row .ln { width: 64px; flex: none; font: 600 13px system-ui; color: #fff; }
+  .link-row .lu {
+    flex: 1; min-width: 0; font: 11.5px ui-monospace, Menlo, Consolas, monospace; color: var(--muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .link-row .btn { padding: 6px 14px; font-size: 13px; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 24px; z-index: 30;
+    transform: translate(-50%, 16px); opacity: 0; pointer-events: none;
+    max-width: calc(100vw - 32px); padding: 10px 18px; border-radius: 999px; text-align: center;
+    font: 13px system-ui; color: #fff; background: rgba(20, 24, 36, 0.9);
+    transition: opacity 0.25s, transform 0.25s;
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  .toast.error { border-color: rgba(255, 140, 140, 0.6); }
+
+  @media (max-width: 720px) {
+    .now { flex-wrap: wrap; }
+    .vod-row .vt { width: 96px; }
+    .modal textarea, .modal .field input { font-size: 16px; }
+    .modal .btn { min-height: 44px; }
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div class="glass player">
+    <video id="video" controls playsinline></video>
+  </div>
+
+  <div id="nowPlaying" class="glass now" hidden>
+    <div class="np-text">
+      <div id="npTitle" class="np-title"></div>
+      <div id="npMeta" class="np-meta"></div>
+    </div>
+    <button id="npLinks" class="btn ghost" type="button">Links</button>
+  </div>
+
+  <div class="glass bar">
+    <input id="src" type="text" placeholder="Paste a Kick VOD link, video ID, or .m3u8 URL">
+    <button id="load">Load</button>
+    <button id="saveBtn" class="ghost" title="Save this link">Save</button>
+    <button id="jsonBtn" class="ghost icon" title="Import Kick VOD JSON (or just press Ctrl+V anywhere)" aria-label="Import VOD JSON"><b style="font:700 13px ui-monospace,Menlo,Consolas,monospace">{ }</b></button>
+    <button id="settingsBtn" class="ghost icon" title="Stream IDs used to build links" aria-label="Stream ID settings">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+    </button>
+    <label class="proxy-toggle"><input id="useProxy" type="checkbox" checked> Proxy</label>
+    <select id="quality"><option value="-1">Auto</option></select>
+    <label>Seek
+      <input id="seekStep" type="number" min="0.1" step="any" value="5">
+    </label>
+  </div>
+
+  <div id="stats"></div>
+</div>
+
+<aside id="drawer" class="glass drawer" aria-label="Saved links">
+  <button id="tab" class="tab" aria-expanded="false" aria-controls="drawerBody" title="Saved links">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4h12v17l-6-4-6 4z"/></svg>
+    <span id="tabCount">0</span>
+  </button>
+  <div id="drawerBody" class="drawer-body">
+    <div class="drawer-head">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4h12v17l-6-4-6 4z"/></svg>
+      <input id="drawerTitle" type="text" maxlength="40" value="Saved links" aria-label="Panel title" title="Click to rename">
+      <button id="closeDrawer" class="icon-btn" aria-label="Close panel">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+      </button>
+    </div>
+    <div id="cards" class="cards"></div>
+  </div>
+</aside>
+
+<div id="modal" class="modal" aria-hidden="true">
+  <div class="glass modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-head">
+      <h2 id="modalTitle"></h2>
+      <button id="modalClose" class="icon-btn" type="button" aria-label="Close">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div id="modalBody" class="modal-body"></div>
+  </div>
+</div>
+<div id="toast" class="glass toast" role="status" aria-live="polite"></div>
+
+<script>
+(function () {
+  // No default stream: paste an .m3u8 URL in the box, or use ?src=... in the page URL
+  var DEFAULT_SRC = "";
+
+  // Proxy route on this server. When the Proxy box is checked, streams go through it.
+  var PROXY_PATH = "/proxy?url=";
+
+  var video = document.getElementById("video");
+  var srcInput = document.getElementById("src");
+  var qualitySel = document.getElementById("quality");
+  var stats = document.getElementById("stats");
+  var seekInput = document.getElementById("seekStep");
+  var useProxyBox = document.getElementById("useProxy");
+  var hls = null;
+
+  // Remember the Proxy checkbox state between visits
+  try {
+    var savedProxy = localStorage.getItem("useProxy");
+    if (savedProxy !== null) useProxyBox.checked = savedProxy === "1";
+  } catch (err) {}
+  useProxyBox.onchange = function () {
+    try { localStorage.setItem("useProxy", useProxyBox.checked ? "1" : "0"); } catch (err) {}
+  };
+
+  // Allow ?src=... in the page URL to override the default stream
+  var params = new URLSearchParams(location.search);
+  srcInput.value = params.get("src") || DEFAULT_SRC;
+
+  // iPhone and iPad play HLS natively more reliably; everything else uses hls.js
+  var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+              (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+  function load(url) {
+    if (!url) {
+      stats.textContent = "Paste a Kick VOD link, video ID, or .m3u8 URL and press Load";
+      return;
+    }
+    stats.textContent = "Loading…"; // clears the old "Paste a link…" hint so the buffer readout can show
+    if (hls) { hls.destroy(); hls = null; }
+    qualitySel.innerHTML = '<option value="-1">Auto</option>';
+    qualitySel.onchange = null;
+
+    // VOD page links / bare IDs can only be resolved by the server, so they always go through the proxy
+    var isDirectM3u8 = /\.m3u8(\?|$)/i.test(url);
+    var playUrl = (useProxyBox.checked || !isDirectM3u8)
+      ? PROXY_PATH + encodeURIComponent(url)
+      : url;
+
+    if (window.Hls && Hls.isSupported() && !isIOS) {
+      hls = new Hls({
+        enableWorker: true,
+        startLevel: -1,
+        capLevelToPlayerSize: true,
+        maxBufferLength: 30,
+        maxMaxBufferLength: 60,
+        backBufferLength: 20,
+        lowLatencyMode: false
+      });
+
+      hls.loadSource(playUrl);
+      hls.attachMedia(video);
+
+      hls.on(Hls.Events.MANIFEST_PARSED, function (event, data) {
+        data.levels.forEach(function (lvl, i) {
+          var opt = document.createElement("option");
+          opt.value = i;
+          opt.textContent = (lvl.height || "?") + "p " + Math.round(lvl.bitrate / 1000) + " kbps";
+          qualitySel.appendChild(opt);
+        });
+        video.play().catch(function () {});
+      });
+
+      hls.on(Hls.Events.ERROR, function (event, data) {
+        if (!data.fatal) return;
+        stats.textContent = "Error: " + data.type + " / " + data.details;
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+          hls.startLoad();
+        } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          hls.recoverMediaError();
+        }
+      });
+
+      qualitySel.onchange = function () {
+        hls.currentLevel = parseInt(qualitySel.value, 10);
+      };
+    } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      video.src = playUrl;
+      video.addEventListener("error", function () {
+        stats.textContent = "Playback error (native HLS)";
+      }, { once: true });
+    } else {
+      stats.textContent = "HLS is not supported in this browser";
+    }
+  }
+
+  document.getElementById("load").onclick = function () {
+    this.blur(); // keep focus off the button so Space does not click it again
+    submitInput();
+  };
+  srcInput.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") submitInput();
+  });
+
+  // Status line: buffered seconds ahead and active level (only once a source is loaded)
+  setInterval(function () {
+    if (!video.currentSrc && !hls) return;
+    if (stats.textContent.startsWith("Error") || stats.textContent.startsWith("Paste")) return;
+    var ahead = 0;
+    var b = video.buffered;
+    if (b.length) ahead = b.end(b.length - 1) - video.currentTime;
+    var level = hls && hls.currentLevel >= 0 ? " · level " + hls.currentLevel : "";
+    stats.textContent = "buffer " + ahead.toFixed(1) + "s" + level;
+  }, 1000);
+
+  // Keep the native video element from taking keyboard focus
+  video.addEventListener("focus", function () { video.blur(); });
+
+  // Keyboard seeking helpers
+  function getStep() {
+    var n = parseFloat(seekInput.value);
+    return isFinite(n) && n > 0 ? n : 5;
+  }
+
+  function seekBy(delta) {
+    var target = video.currentTime + delta;
+    if (target < 0) target = 0;
+    if (isFinite(video.duration) && target > video.duration) target = video.duration;
+    video.currentTime = target;
+  }
+
+  // Capture phase, so the native video handler never sees these keys
+  document.addEventListener("keydown", function (e) {
+    var tag = e.target && e.target.tagName;
+    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+    if (document.getElementById("modal").classList.contains("open")) return; // dialogs keep their own keys
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+    var key = e.key.toLowerCase();
+
+    // Space toggles play/pause (the key reports " " on every layout)
+    if (key === " " || key === "spacebar") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (video.paused) video.play().catch(function () {}); else video.pause();
+      return;
+    }
+
+    // "f" and "ب" (the F key on the Persian layout) toggle fullscreen
+    if (key === "f" || key === "ب") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(function () {});
+      } else {
+        video.requestFullscreen().catch(function () {});
+      }
+      return;
+    }
+
+    // m / ئ (the M key on the Persian layout) toggle mute
+    if (key === "m" || key === "ئ") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      video.muted = !video.muted;
+      return;
+    }
+
+    // j / ت (Persian J key) lower volume, k / ن (Persian K key) raise volume
+    if (key === "j" || key === "ت" || key === "k" || key === "ن") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      var up = key === "k" || key === "ن";
+      video.volume = Math.min(1, Math.max(0, video.volume + (up ? 0.1 : -0.1)));
+      if (up) video.muted = false;
+      return;
+    }
+
+    // Seek back: arrow left, a, ش (Persian A key), h, ا (Persian H key)
+    // Seek forward: arrow right, d, ی / ي (Persian D key), l, م (Persian L key)
+    var isBack = key === "arrowleft" || key === "a" || key === "ش" || key === "h" || key === "ا";
+    var isFwd = key === "arrowright" || key === "d" || key === "ی" || key === "ي" || key === "l" || key === "م";
+    if (!isBack && !isFwd) return;
+
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    seekBy(isBack ? -getStep() : getStep());
+  }, true);
+
+  // ---------- Saved links drawer ----------
+  var drawer = document.getElementById("drawer");
+  var tabBtn = document.getElementById("tab");
+  var tabCount = document.getElementById("tabCount");
+  var cardsEl = document.getElementById("cards");
+  var drawerTitle = document.getElementById("drawerTitle");
+  var saved = [];
+  var saving = false;
+  var PLAY_SVG = '<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 5l12 7-12 7z"/></svg>';
+  var X_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+  var PLUS_SVG = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
+
+  try {
+    var raw = JSON.parse(localStorage.getItem("savedLinks") || "[]");
+    if (Array.isArray(raw)) saved = raw.filter(function (x) { return x && typeof x.url === "string"; });
+    var t = localStorage.getItem("savedTitle");
+    if (t) drawerTitle.value = t;
+  } catch (err) {}
+
+  function persist() {
+    try { localStorage.setItem("savedLinks", JSON.stringify(saved)); } catch (err) {}
+  }
+
+  function setOpen(open) {
+    drawer.classList.toggle("open", open);
+    tabBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    try { localStorage.setItem("drawerOpen", open ? "1" : "0"); } catch (err) {}
+  }
+  tabBtn.onclick = function () { setOpen(!drawer.classList.contains("open")); this.blur(); };
+  document.getElementById("closeDrawer").onclick = function () { setOpen(false); this.blur(); };
+
+  drawerTitle.onchange = function () {
+    var v = drawerTitle.value.trim() || "Saved links";
+    drawerTitle.value = v;
+    try { localStorage.setItem("savedTitle", v); } catch (err) {}
+  };
+  drawerTitle.onkeydown = function (e) { if (e.key === "Enter") drawerTitle.blur(); };
+
+  function hueOf(s) {
+    var h = 0;
+    for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+    return h;
+  }
+
+  function defaultTitle(url) {
+    try {
+      var u = new URL(url);
+      var m = url.match(/\/videos\/([0-9a-f-]{8})/i);
+      return m ? u.pathname.split("/")[1] + " · " + m[1] : u.hostname;
+    } catch (err) {
+      return url.slice(0, 24);
+    }
+  }
+
+  function startRename(item, el) {
+    var inp = document.createElement("input");
+    inp.type = "text"; inp.className = "rename"; inp.value = item.title; inp.maxLength = 60;
+    el.replaceWith(inp);
+    inp.focus(); inp.select();
+    var done = false;
+    function finish(commit) {
+      if (done) return;
+      done = true;
+      var v = inp.value.trim();
+      if (commit && v) { item.title = v; persist(); }
+      render();
+    }
+    inp.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") finish(true);
+      else if (e.key === "Escape") finish(false);
+    });
+    inp.addEventListener("blur", function () { finish(true); });
+  }
+
+  function playSaved(item) {
+    srcInput.value = item.url;
+    load(item.url);
+    onSavedPlayed(item);
+    if (document.activeElement) document.activeElement.blur();
+  }
+
+  function buildCard(item) {
+    var card = document.createElement("div");
+    card.className = "card";
+
+    var h = hueOf(item.title + item.url);
+    var thumb = document.createElement("button");
+    thumb.className = "thumb";
+    thumb.setAttribute("aria-label", "Play " + item.title);
+    thumb.style.background = "linear-gradient(135deg, hsl(" + h + " 70% 55%), hsl(" + ((h + 60) % 360) + " 60% 25%))";
+    thumb.innerHTML = PLAY_SVG;
+
+    var del = document.createElement("button");
+    del.className = "del";
+    del.setAttribute("aria-label", "Delete " + item.title);
+    del.innerHTML = X_SVG;
+    del.onclick = function (e) {
+      e.stopPropagation();
+      saved = saved.filter(function (x) { return x !== item; });
+      persist(); render();
+    };
+
+    var meta = document.createElement("div");
+    meta.className = "meta";
+    var name = document.createElement("div");
+    name.className = "name"; name.textContent = item.title; name.title = "Double-click to rename";
+    name.ondblclick = function (e) { e.stopPropagation(); startRename(item, name); };
+    var link = document.createElement("div");
+    link.className = "link"; link.textContent = item.url.replace(/^https?:\/\//, ""); link.title = item.url;
+    meta.appendChild(name); meta.appendChild(link);
+
+    card.appendChild(thumb); card.appendChild(del); card.appendChild(meta);
+    card.onclick = function (e) {
+      if (e.target.closest(".del") || e.target.tagName === "INPUT") return;
+      playSaved(item);
+    };
+    return card;
+  }
+
+  function buildSaveForm() {
+    var form = document.createElement("div");
+    form.className = "save-form";
+    var inp = document.createElement("input");
+    inp.type = "text"; inp.maxLength = 60; inp.placeholder = "Title (optional)";
+    inp.setAttribute("aria-label", "Title for this link");
+    // Links built from a VOD JSON come with a title: prefill it
+    if (currentTitle && srcInput.value.trim() === currentUrl) inp.value = currentTitle;
+    var hint = document.createElement("div");
+    hint.className = "hint";
+    var row = document.createElement("div");
+    row.className = "row";
+    var ok = document.createElement("button"); ok.textContent = "Save";
+    var cancel = document.createElement("button"); cancel.textContent = "Cancel"; cancel.className = "cancel";
+    row.appendChild(ok); row.appendChild(cancel);
+    form.appendChild(inp); form.appendChild(hint); form.appendChild(row);
+
+    function confirmSave() {
+      var url = srcInput.value.trim();
+      if (!url) { hint.textContent = "Paste a link in the main box first"; return; }
+      var title = inp.value.trim() || defaultTitle(url);
+      var existing = saved.filter(function (x) { return x.url === url; })[0];
+      if (existing) existing.title = title;
+      else saved.push({ id: Date.now().toString(36), title: title, url: url });
+      saving = false;
+      persist(); render();
+    }
+    ok.onclick = confirmSave;
+    cancel.onclick = function () { saving = false; render(); };
+    inp.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") confirmSave();
+      else if (e.key === "Escape") { saving = false; render(); }
+    });
+    setTimeout(function () { inp.focus(); }, 0);
+    return form;
+  }
+
+  function render() {
+    tabCount.textContent = saved.length;
+    cardsEl.innerHTML = "";
+    saved.forEach(function (item) { cardsEl.appendChild(buildCard(item)); });
+    if (saving) {
+      cardsEl.appendChild(buildSaveForm());
+    } else {
+      var add = document.createElement("button");
+      add.className = "add-card";
+      add.innerHTML = PLUS_SVG + "<span>Save current</span>";
+      add.onclick = function () { startSave(); };
+      cardsEl.appendChild(add);
+    }
+  }
+
+  function startSave() {
+    setOpen(true);
+    saving = true;
+    render();
+  }
+  document.getElementById("saveBtn").onclick = function () { this.blur(); startSave(); };
+
+  try { setOpen(localStorage.getItem("drawerOpen") === "1"); } catch (err) { setOpen(false); }
+  render();
+
+  // ---------- Kick VOD JSON -> HLS link ----------
+  // Link shape: https://stream.kick.com/<hash>/ivs/v1/<account>/<t1>/<Y>/<M>/<D>/<h>/<m>/<t2>/media/hls/master.m3u8
+  //   <hash> and <account> are editable in the settings dialog (they can differ per stream)
+  //   <t1>/<t2> come from the thumbnail URL, the date parts from start_time (UTC)
+  var STREAM_HOST = "https://stream.kick.com";
+  var DEFAULT_IDS = { hash: "3c81249a5ce0", account: "196233775518" };
+  var FALLBACK_QUALITIES = ["1080p60", "720p60", "480p30", "360p30", "160p30"];
+  var MINUTE_OFFSETS = [0, -1, 1, -2, 2]; // start_time and the CDN folder can differ by a minute or two
+
+  var ids = { hash: DEFAULT_IDS.hash, account: DEFAULT_IDS.account };
+  try {
+    var storedIds = JSON.parse(localStorage.getItem("streamIds") || "null");
+    if (storedIds && storedIds.hash && storedIds.account) {
+      ids = { hash: String(storedIds.hash), account: String(storedIds.account) };
+    }
+  } catch (err) {}
+
+  var currentUrl = "";       // master URL that was last built from a VOD
+  var currentTitle = "";     // its title (used to prefill the Save form)
+  var currentVariants = null; // [[name, url], ...] read from the real master playlist
+  var playToken = 0;
+
+  var modal = document.getElementById("modal");
+  var modalBody = document.getElementById("modalBody");
+  var modalTitle = document.getElementById("modalTitle");
+  var toastEl = document.getElementById("toast");
+  var nowEl = document.getElementById("nowPlaying");
+  var toastTimer = 0;
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  function toast(msg, ms, isError) {
+    clearTimeout(toastTimer);
+    toastEl.textContent = msg;
+    toastEl.classList.toggle("error", !!isError);
+    toastEl.classList.add("show");
+    if (ms !== 0) toastTimer = setTimeout(function () { toastEl.classList.remove("show"); }, ms || 2600);
+  }
+  function hideToast() { clearTimeout(toastTimer); toastEl.classList.remove("show"); }
+
+  function openModal(title, nodes) {
+    modalTitle.textContent = title;
+    modalBody.innerHTML = "";
+    nodes.forEach(function (n) { modalBody.appendChild(n); });
+    modal.classList.add("open");
+    modal.setAttribute("aria-hidden", "false");
+    var first = modalBody.querySelector("textarea, input");
+    if (first) setTimeout(function () { first.focus(); }, 0);
+  }
+  function closeModal() {
+    modal.classList.remove("open");
+    modal.setAttribute("aria-hidden", "true");
+    if (document.activeElement) document.activeElement.blur();
+  }
+  document.getElementById("modalClose").onclick = closeModal;
+  modal.addEventListener("mousedown", function (e) { if (e.target === modal) closeModal(); });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && modal.classList.contains("open")) closeModal();
+  });
+
+  function fallbackCopy(text) {
+    var ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    var ok = false;
+    try { ok = document.execCommand("copy"); } catch (err) {}
+    ta.remove();
+    return ok;
+  }
+  function copyText(text) {
+    var done = function (ok) { toast(ok ? "Copied" : "Copy failed", 1600, !ok); };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(fallbackCopy(text)); });
+    } else {
+      done(fallbackCopy(text));
+    }
+  }
+
+  // ----- parsing -----
+  function looksLikeJson(s) { return /^\s*[\[{]/.test(s) && s.indexOf("start_time") !== -1; }
+
+  // Tolerates what you get when copying from devtools: a trailing comma or a bare "{...},{...}" list
+  function parseJsonLoose(text) {
+    var t = text.trim().replace(/,\s*$/, "");
+    try { return JSON.parse(t); } catch (err) {}
+    try { return JSON.parse("[" + t + "]"); } catch (err) {}
+    return null;
+  }
+
+  // Walk any JSON shape ({...}, [...], {data:[...]}) and collect VOD-looking objects
+  function findVods(v, out, depth) {
+    if (!v || typeof v !== "object" || depth > 6) return out;
+    if (Array.isArray(v)) { v.forEach(function (x) { findVods(x, out, depth + 1); }); return out; }
+    if (typeof v.start_time === "string" && (v.thumbnail || v.video)) { out.push(v); return out; }
+    Object.keys(v).forEach(function (k) { findVods(v[k], out, depth + 1); });
+    return out;
+  }
+
+  function startMs(vod) {
+    var m = String(vod.start_time || "").match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):?(\d{2})?/);
+    if (!m) return NaN;
+    var n = m.slice(1).map(function (x) { return Number(x || 0); });
+    return Date.UTC(n[0], n[1] - 1, n[2], n[3], n[4], n[5]);
+  }
+
+  // Folder holding master.m3u8 for a given minute offset, or null if the JSON lacks what we need
+  function buildDir(vod, offsetMin) {
+    var th = String((vod.thumbnail && vod.thumbnail.src) || "").match(/video_thumbnails\/([^/]+)\/([^/]+)\//);
+    var t = startMs(vod);
+    if (!th || isNaN(t)) return null;
+    var d = new Date(t - (t % 60000) + offsetMin * 60000); // Date handles hour/day/month rollover
+    return STREAM_HOST + "/" + ids.hash + "/ivs/v1/" + ids.account + "/" + th[1] + "/" +
+           d.getUTCFullYear() + "/" + (d.getUTCMonth() + 1) + "/" + d.getUTCDate() + "/" +
+           d.getUTCHours() + "/" + d.getUTCMinutes() + "/" + th[2] + "/media/hls/";
+  }
+
+  // Ask the proxy for the playlist: returns its text, false (HTTP error) or null (server unreachable)
+  function probe(url) {
+    var ctrl = new AbortController();
+    var timer = setTimeout(function () { ctrl.abort(); }, 8000);
+    return fetch(PROXY_PATH + encodeURIComponent(url), { signal: ctrl.signal })
+      .then(function (r) {
+        if (!r.ok) return false;
+        return r.text().then(function (t) { return /#EXTM3U/.test(t) ? t : false; });
+      })
+      .catch(function () { return null; })
+      .then(function (v) { clearTimeout(timer); return v; });
+  }
+
+  // The proxy rewrites playlist URIs to /proxy?url=<real>; read the real ones back
+  function variantsFromMaster(text) {
+    var out = [], name = "";
+    text.split("\n").forEach(function (raw) {
+      var l = raw.trim();
+      if (!l) return;
+      if (l.indexOf("#EXT-X-STREAM-INF") === 0) {
+        var m = l.match(/VIDEO="([^"]+)"/) || l.match(/NAME="([^"]+)"/);
+        var r = l.match(/RESOLUTION=\d+x(\d+)/);
+        name = m ? m[1] : (r ? r[1] + "p" : "");
+      } else if (l.charAt(0) !== "#") {
+        var real = l;
+        try { real = new URL(l, location.href).searchParams.get("url") || l; } catch (err) {}
+        out.push([name || "Level", real]);
+        name = "";
+      }
+    });
+    return out;
+  }
+
+  function fmtDuration(ms) {
+    var s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+    return h + ":" + String(m).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
+  }
+
+  function vodMeta(vod) {
+    var parts = [];
+    var t = startMs(vod);
+    if (!isNaN(t)) parts.push(new Date(t).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }));
+    if (typeof vod.duration === "number") parts.push(fmtDuration(vod.duration));
+    if (typeof vod.views === "number") parts.push(vod.views.toLocaleString() + " views");
+    var cat = vod.categories && vod.categories[0] && vod.categories[0].name;
+    if (cat) parts.push(cat);
+    return parts.join(" · ");
+  }
+
+  // ----- now playing + links -----
+  function showNowPlaying(title, meta, masterUrl) {
+    document.getElementById("npTitle").textContent = title;
+    document.getElementById("npMeta").textContent = meta || "";
+    nowEl.hidden = false;
+    nowEl.dataset.master = masterUrl || "";
+    document.getElementById("npLinks").hidden = !masterUrl;
+  }
+  function clearNowPlaying() {
+    nowEl.hidden = true; nowEl.dataset.master = "";
+    currentUrl = ""; currentTitle = ""; currentVariants = null;
+  }
+  function onSavedPlayed(item) {
+    clearNowPlaying();
+    if (/\/master\.m3u8(\?|$)/i.test(item.url)) showNowPlaying(item.title, "Saved link", item.url);
+  }
+
+  function openLinks() {
+    var master = nowEl.dataset.master;
+    if (!master) return;
+    var rows = [["Master", master]];
+    if (currentVariants && currentUrl === master && currentVariants.length) {
+      currentVariants.forEach(function (v) { rows.push(v); });
+    } else {
+      var dir = master.slice(0, master.lastIndexOf("/") + 1);
+      FALLBACK_QUALITIES.forEach(function (q) { rows.push([q, dir + q + "/playlist.m3u8"]); });
+    }
+    var nodes = rows.map(function (r) {
+      var row = el("div", "link-row");
+      var btn = el("button", "btn ghost", "Copy");
+      btn.type = "button";
+      btn.onclick = function () { copyText(r[1]); };
+      var u = el("div", "lu", r[1]); u.title = r[1];
+      row.appendChild(el("div", "ln", r[0])); row.appendChild(u); row.appendChild(btn);
+      return row;
+    });
+    var all = el("button", "btn", "Copy all");
+    all.type = "button";
+    all.onclick = function () { copyText(rows.map(function (r) { return r[0] + ": " + r[1]; }).join("\n")); };
+    var actions = el("div", "modal-actions"); actions.appendChild(all);
+    openModal("Stream links", nodes.concat([actions]));
+  }
+  document.getElementById("npLinks").onclick = function () { openLinks(); };
+
+  // ----- playing a VOD -----
+  async function playVod(vod) {
+    var token = ++playToken;
+    var title = vod.session_title || "Untitled VOD";
+    toast("Looking for the stream…", 0);
+
+    var cands = MINUTE_OFFSETS.map(function (o) { return { offset: o, dir: buildDir(vod, o) }; })
+      .filter(function (c) { return c.dir; });
+    var hit = null;
+
+    if (cands.length) {
+      // Try every candidate minute at once and take the first (closest to 0) that answers
+      var res = await Promise.all(cands.map(function (c) { return probe(c.dir + "master.m3u8"); }));
+      if (token !== playToken) return;
+      for (var i = 0; i < res.length; i++) {
+        if (res[i]) { hit = { offset: cands[i].offset, dir: cands[i].dir, text: res[i] }; break; }
+      }
+      // Server not reachable at all (static hosting?): just trust offset 0
+      if (!hit && res.every(function (r) { return r === null; })) hit = { offset: 0, dir: cands[0].dir, text: null };
+    }
+
+    if (hit) {
+      var master = hit.dir + "master.m3u8";
+      clearNowPlaying();
+      currentUrl = master; currentTitle = title;
+      currentVariants = hit.text ? variantsFromMaster(hit.text) : null;
+      srcInput.value = master;
+      load(master);
+      showNowPlaying(title, vodMeta(vod), master);
+      toast(hit.offset ? "Found with a " + (hit.offset > 0 ? "+" : "") + hit.offset + " min offset" : "Stream found", 2600);
+      return;
+    }
+
+    // The built link did not answer: fall back to the server-side resolver using the VOD uuid
+    var uuid = vod.video && vod.video.uuid;
+    if (uuid) {
+      clearNowPlaying();
+      currentTitle = title; currentUrl = "https://kick.com/video/" + uuid;
+      srcInput.value = currentUrl;
+      load(currentUrl);
+      showNowPlaying(title, vodMeta(vod));
+      toast("Built link not reachable, using Kick resolver instead", 4000);
+      return;
+    }
+    toast("Stream not found. Check the two IDs in settings (gear icon).", 6000, true);
+  }
+
+  function openPicker(vods) {
+    var nodes = [el("p", "modal-note", "Pick the stream to play.")];
+    vods.forEach(function (vod) {
+      var row = el("button", "vod-row");
+      row.type = "button";
+      var th = el("div", "vt");
+      var src = vod.thumbnail && vod.thumbnail.src;
+      if (src) {
+        var img = new Image();
+        img.src = src; img.alt = ""; img.loading = "lazy"; img.referrerPolicy = "no-referrer";
+        img.onerror = function () { img.remove(); };
+        th.appendChild(img);
+      }
+      th.style.background = "linear-gradient(135deg, hsl(" + hueOf(vod.session_title || "x") + " 70% 45%), #151822)";
+      var info = el("div", "vi");
+      info.appendChild(el("div", "vn", vod.session_title || "Untitled VOD"));
+      info.appendChild(el("div", "vm", vodMeta(vod)));
+      row.appendChild(th); row.appendChild(info);
+      row.onclick = function () { closeModal(); playVod(vod); };
+      nodes.push(row);
+    });
+    openModal(vods.length + " streams found", nodes);
+  }
+
+  function importJson(text) {
+    var data = parseJsonLoose(text);
+    var seen = {};
+    var vods = (data ? findVods(data, [], 0) : []).filter(function (v) {
+      var key = v.id != null ? v.id : v.start_time;
+      if (seen[key]) return false;
+      return (seen[key] = true);
+    });
+    if (!vods.length) {
+      toast("No VOD found in that JSON (it needs start_time and thumbnail)", 5000, true);
+      return false;
+    }
+    closeModal();
+    if (vods.length === 1) playVod(vods[0]); else openPicker(vods);
+    return true;
+  }
+
+  // Remember the two IDs from any pasted Kick stream link
+  function learnFromUrl(url) {
+    var m = url.match(/stream\.kick\.com\/([^/]+)\/ivs\/v1\/(\d+)\//);
+    if (!m || (m[1] === ids.hash && m[2] === ids.account)) return;
+    ids = { hash: m[1], account: m[2] };
+    saveIds();
+    toast("Stream IDs updated from this link", 3200);
+  }
+  function saveIds() {
+    try { localStorage.setItem("streamIds", JSON.stringify(ids)); } catch (err) {}
+  }
+
+  function submitInput() {
+    var v = srcInput.value.trim();
+    if (looksLikeJson(v)) { if (importJson(v)) srcInput.value = ""; return; }
+    learnFromUrl(v);
+    clearNowPlaying();
+    load(v);
+  }
+
+  // ----- dialogs: JSON import + settings -----
+  function openImport() {
+    var ta = el("textarea");
+    ta.placeholder = '{ "start_time": "2026-10-22 20:46:38", "thumbnail": { "src": "https://images.kick.com/video_thumbnails/…" }, … }';
+    ta.spellcheck = false;
+    var go = el("button", "btn", "Play");
+    go.type = "button";
+    go.onclick = function () { importJson(ta.value); };
+    ta.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) importJson(ta.value);
+    });
+    var actions = el("div", "modal-actions"); actions.appendChild(go);
+    openModal("Import Kick VOD JSON", [
+      el("p", "modal-note", "Paste one VOD object, or a whole list. You can also press Ctrl+V anywhere on the page, or drop a .json file here."),
+      ta, actions
+    ]);
+  }
+
+  function openSettings() {
+    function field(label, key) {
+      var f = el("div", "field");
+      var l = el("label", null, label);
+      var inp = el("input");
+      inp.type = "text"; inp.value = ids[key]; inp.spellcheck = false; inp.autocomplete = "off";
+      f.appendChild(l); f.appendChild(inp);
+      return { wrap: f, input: inp };
+    }
+    var hash = field("Channel hash (first ID in the link)", "hash");
+    var acct = field("Account ID (second ID in the link)", "account");
+    var preview = el("div", "url-preview");
+    function update() {
+      preview.textContent = STREAM_HOST + "/" + (hash.input.value.trim() || "…") + "/ivs/v1/" +
+        (acct.input.value.trim() || "…") + "/…";
+    }
+    hash.input.oninput = update; acct.input.oninput = update; update();
+
+    var save = el("button", "btn", "Save"); save.type = "button";
+    var reset = el("button", "btn ghost", "Reset to defaults"); reset.type = "button";
+    save.onclick = function () {
+      var h = hash.input.value.trim(), a = acct.input.value.trim();
+      if (!/^[\w-]+$/.test(h) || !/^[\w-]+$/.test(a)) { toast("IDs can only contain letters, digits, - and _", 3500, true); return; }
+      ids = { hash: h, account: a };
+      saveIds(); closeModal(); toast("Saved", 1800);
+    };
+    reset.onclick = function () {
+      hash.input.value = DEFAULT_IDS.hash; acct.input.value = DEFAULT_IDS.account; update();
+    };
+    var actions = el("div", "modal-actions"); actions.appendChild(reset); actions.appendChild(save);
+    openModal("Stream IDs", [
+      el("p", "modal-note", "These two parts of the link can change between channels or over time. They are used when building links from VOD JSON. Pasting any working stream.kick.com link updates them automatically."),
+      hash.wrap, acct.wrap, preview, actions
+    ]);
+  }
+
+  document.getElementById("jsonBtn").onclick = function () { this.blur(); openImport(); };
+  document.getElementById("settingsBtn").onclick = function () { this.blur(); openSettings(); };
+
+  // Paste JSON anywhere (or a plain link when no field is focused)
+  document.addEventListener("paste", function (e) {
+    var t = e.target, tag = t && t.tagName;
+    if (tag === "TEXTAREA" || (tag === "INPUT" && t !== srcInput)) return;
+    var text = ((e.clipboardData && e.clipboardData.getData("text")) || "").trim();
+    if (looksLikeJson(text)) {
+      e.preventDefault();
+      importJson(text);
+    } else if (tag !== "INPUT" && /^https?:\/\/\S+$/.test(text)) {
+      e.preventDefault();
+      srcInput.value = text;
+      submitInput();
+    }
+  });
+
+  // Drop a .json file on the page
+  document.addEventListener("dragover", function (e) {
+    if (e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], "Files") !== -1) e.preventDefault();
+  });
+  document.addEventListener("drop", function (e) {
+    var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!f) return;
+    e.preventDefault();
+    f.text().then(function (txt) { importJson(txt); });
+  });
+
+  load(srcInput.value);
+})();
+</script>
+</body>
+</html>
